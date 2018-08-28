@@ -1,0 +1,40 @@
+PROJECT (MINCDIFFUSION)
+SET(MINC /usr/local/bic)
+SET(NETCDF /usr)
+SET(GSL /usr)
+SET(X11 /usr/X11R6)
+SET(VTK /usr)
+SET(CMAKE_CXX_FLAGS -Wno-deprecated)
+SET(CMAKE_C_FLAGS -Wno-deprecated)
+SET(MINCDIFFUSION_C src/misc.c++ src/DisplayWindow.c++
+src/ImageData.c++
+src/Directions.c++ src/DiffusionParameters.c++  src/ODFPlotter.c++
+src/S2Interpolator.c++ src/DiffusionODFCalculator.c++
+src/ThreeOrthogonalPlanesPlotter.c++ src/FibreTract.c++
+src/FibreTractSet.c++ src/ProcessedDTIData.c++
+src/FibreTractPlotter.c++ src/LevelSetPlotter.c++
+src/FibreTracking.c++ src/InteractorStyleFibreTract.c++
+src/InteractorStyleMovie.c++ src/InteractorStyleLevelSet.c++
+src/SphericalHarmonics.c++
+src/Deconvolver.c++)
+INCLUDE_DIRECTORIES(include /usr/local/include /usr/include ${MINC}/include
+${VTK}/include/vtk-5.0 ${VTK}/Rendering ${GSL}/include/gsl ${GSL}/include/ ${NETCDF}/include)
+LINK_DIRECTORIES(${MINC}/lib /usr/lib ${X11}/lib /lib ${VTK}/lib
+${GSL}/lib ${NETCDF}/lib)
+LINK_LIBRARIES(netcdf volume_io2 minc2 hdf5 m vtkCommon vtkGraphics
+vtkFiltering vtkImaging vtkRendering vtkWidgets vtkIO vtkHybrid gsl
+gslcblas glut GLU GL pthread X11 Xext Xmu Xt Xi SM ICE dl)
+#ADD_EXECUTABLE(MGH2minc src/MGH2minc.c++ ${MINCDIFFUSION_C})
+ADD_EXECUTABLE(mincQBI src/QBI.c++ ${MINCDIFFUSION_C})
+ADD_EXECUTABLE(minc3Dvis src/3Dvis.c++ ${MINCDIFFUSION_C})
+#ADD_EXECUTABLE(DTI_ODF src/DTI_ODF.c++ ${MINCDIFFUSION_C})
+ADD_EXECUTABLE(transform_diff_dirs src/transform_diff_dirs.c++ ${MINCDIFFUSION_C})
+ADD_EXECUTABLE(mincFibreTrack src/FibreTrack.c++ ${MINCDIFFUSION_C})
+#ADD_EXECUTABLE(ODFMaxima src/ODFMaxima.c++ ${MINCDIFFUSION_C})
+#ADD_EXECUTABLE(mkMIP src/mkMIP.c++ ${MINCDIFFUSION_C})
+#ADD_EXECUTABLE(NormalizeODF src/NormalizeODF.c++ ${MINCDIFFUSION_C})
+#ADD_EXECUTABLE(MakeLabeledMaximaVolume src/MakeLabeledMaximaVolume.c++ ${MINCDIFFUSION_C})
+#ADD_EXECUTABLE(UnMosaic src/UnMosaic.c++ ${MINCDIFFUSION_C})
+#ADD_EXECUTABLE(Segment src/Segment.c++ ${MINCDIFFUSION_C})
+ADD_EXECUTABLE(Deconvolve src/Deconvolve.c++ ${MINCDIFFUSION_C})
+

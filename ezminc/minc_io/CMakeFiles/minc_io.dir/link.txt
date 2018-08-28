@@ -1,0 +1,2 @@
+/usr/bin/ar cq libminc_io.a  CMakeFiles/minc_io.dir/minc_1_rw.o CMakeFiles/minc_io.dir/minc_1_simple_rw.o
+/usr/bin/ranlib libminc_io.a

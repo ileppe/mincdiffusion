@@ -1,0 +1,815 @@
+#! /usr/bin/env perl
+
+###################
+### This function will convert binary .vtk files to ascii and vice-versa
+###
+### VTK format
+###------------------
+####vtk Datafile Version 3.0
+###ASCII or BINARY
+###DATASET POLYDATA
+###POINTS n dataType				## n=number of points			
+###pox poy poz
+###...
+###p(n-1)x p(n-1)y p(n-1)z
+###
+###LINES n size					## n=number of lines size=total number of integers to represent the list
+###numpoints0 i0 j0 k0 ...			## i0 j0 k0 : index into array of points
+###...
+###numpoint(n-1) i(n-1) j(n-1) k(n-1) ...
+#####################
+
+
+use Getopt::Tabular;
+use MNI::Startup qw(nocputimes);
+use MNI::Spawn;
+use MNI::FileUtilities qw(check_output_dirs);
+use File::Basename;
+use PerlIO;
+
+if($0 =~ /[\/A-Za-z_0-9]+\/([A-Za-z0-9_]+)\.pl/) {$program = $1;}	#program name without path
+%opt = ('clobber' => 0,
+	'ascii' => 0,
+	'verbose' => 0
+        );
+$Help = <<HELP;
+|
+| $program converts vtk files if input is binary, output will be ascii and vice-versa (works for lines for now)
+|
+HELP
+
+$Usage = <<USAGE;
+
+Usage: $program [options] <in.vtk> <out.vtk>
+-help for options
+
+USAGE
+
+@args_table = (["-clobber","boolean",0, \$opt{'clobber'},"clobber existing files"],
+	       ["-verbose", "boolean", 0, \$opt{'verbose'}, "be verbose"]);
+		
+Getopt::Tabular::SetHelp ($Help, $Usage);
+GetOptions(\@args_table, \@ARGV) || exit 1;
+## check inputs
+($infile, $outfile) = @ARGV;
+check_infile($program, $infile);
+check_outfile($program, $outfile, $opt{'clobber'});
+
+open(OUT,"> $outfile") or die "can't open $outfile: $!";
+
+
+open(IN,"< $infile") or die "cant' open $infile: $!";
+##get input
+undef $/;
+$in = <IN>; #slurp mode
+
+
+if (-B $infile) { ## check if file is binary
+  #print "BINARY!!\n";
+  open(INB,"< $infile"); ## get a binary handle for the file
+  binmode(INB);
+ # read(INB,$b,80);
+ # print($b);
+}
+## get size of ASCII headers so can count bytes off afterwards
+# the /s modifier allows "." to match a new line
+## length of header = number of characters = number of bytes
+if($in =~ /(#.*float\n)/is){$header1=$1;$length_h1=length($header1);} else {die "Can't get length of 1st header\n";}
+if($in =~ /(LINES.*\n)/i){$header2=$1;$length_h2=length($header2);} else {die "Can't get length of 2nd header\n";}
+
+## get number of points
+#if($in =~ /POINTS\s*(\d+)/i){$numpoints=$1;} else {die "Can't get number of points from $infile\n";}
+if($in =~ /POINTS\s*(\d+).*\n/i){$numpoints=$1;} else {die "Can't get number of points from $infile\n";}
+
+## extract all points
+#if($in =~ /POINTS.*\n([0-9\.\n\s-]*)LINES/gi){$points=$1;} else {die "Can't get points from $infile\n";}
+if($in =~ /\n([0-9\.\n\s-]*)LINES/gi){$points=$1;} else {die "Can't get points from $infile\n";}
+#print "points:$points\n";
+#print $in;
+
+## extract # of lines and # of vertices
+if($in =~ /\s*(\d+)\s+(\d+)/gi) {$numlines=$1; $vertices=$2;} else {die "Can't get # of lines or vertices from $infile\n";}
+#if($in =~ /LINES\s+(\d+)\s+/i) {$numlines=$1;} else {die "Can't get # of lines or vertices from $infile\n";}
+#print "lines:$numlines\t vertices:$vertices\n";
+
+## extract list of indices making up line
+if($in =~ /\n([0-9\n\s]*)/g) {$indices=$1;} else {die "Can't find indices for lines in $infile\n";}
+#print "indices:$indices\n";
+
+@list=split(/\n/,$indices); ## each element of @list is a line (first index is length)
+ 
+#there should be 3*numpoints float numbers (of 4 bytes each)
+$total_floats = 3*$numpoints;
+
+### Get same info from binary file
+##################################
+if (-B $infile){
+  read(INB,$head1,$length_h1); ## read off header
+  #print("head1:$head1\n");
+  ##### Read data points
+
+  for($i=1; $i<=$total_floats; $i++){ 
+    read(INB,$point_BE,4); ## read one float at a time(4bytes)
+    ### VTK files are in BIG endian, need to byte swap for it to makes sense on most linux machines
+    $point=reverse $point_BE;
+    if(($i % 3)==0){ ## need x,y,z points on one line, then carriage return
+      $space="\n";
+    }else{$space=" ";}
+    $point_ascii=unpack("f1",$point);
+    $points .= $point_ascii.$space;
+  }
+  read(INB,$cr,1); ## read off 1 carriage return
+
+  ### Read second header
+  read(INB,$head2,$length_h2);
+  #print "head2=$head2";
+  ### Get list of indices
+  for ($i=0;$i<$numlines;$i++){ #read each line separetely
+    read(INB,$length_BE,4); ## read one integer at a time(4bytes)
+    $length=reverse $length_BE; # byte swap # length of line
+    $length_ascii=unpack("I1",$length);
+    $line=$length_ascii;
+    for ($j=0;$j<$length_ascii;$j++){ # get indeces of lines (first index on each line is the length)
+      read(INB,$index_BE,4);
+      $index=reverse $index_BE;
+      $index_ascii=unpack("I1",$index); ## pack one unsigned int
+      $line .= " ".$index_ascii;
+
+    }
+    $line.="\n";
+    push(@list,$line);
+  }
+}
+############## end binary data reading
+
+##### Write out all info to output file
+if (-B $infile){ ##write out file in ASCII
+  $header1 =~ s/BINARY/ASCII/i;
+  print OUT "$header1$points$header2@list";
+
+}else{ ## print out binary file
+
+  $header1 =~ s/ASCII/BINARY/i;
+  print OUT $header1;
+  @all_points=split(" |\n",$points);
+  foreach $point (@all_points){
+    $point_bin_LE = pack("f1",$point);
+    $point_bin = reverse $point_bin_LE; ## byte_swap to Big Endian
+    print OUT $point_bin;
+  }
+  print OUT "\n";
+  print OUT $header2;
+  foreach $e (@list){
+    @line=split(/ /,$e);
+    #print "line@line\n";
+    $length=shift(@line); ## get length at first index
+    #print "length:$length\n";
+    $length_bin_LE = pack("I1",$length);
+    $length_bin=reverse $length_bin_LE;
+    print OUT $length_bin;
+    foreach $i (@line){ # get indeces of lines (first index on each line is the length)
+      $index_bin_LE = pack("I1",$i);
+      $index_bin=reverse $index_bin_LE;
+      print OUT $index_bin;
+
+    }
+  }
+}
+
+  
+
+close(IN);
+close(OUT);
+#################################################################
+#functions
+#################################################################
+#
+# ------------------------------------------------------------
+#	the list of variables to export
+# ------------------------------------------------------------
+#
+
+$const_pi = 3.1415927;
+$const_twopi = 6.28318530717958647692;
+$const_kernel_dir = "/home/bic/mgriffin/bin/local/common/kernels";
+
+#
+# ------------------------------------------------------------
+#	function declarations
+# ------------------------------------------------------------
+
+#
+#  concat -
+#
+#	If the dimension already exists in the slices then newdim_flag 
+#	has a value of zero and start and step don't need to be defined.
+#
+sub concat {
+  my ($fname_list_in, $dim_name, $newdim_flag, $start, $step, $fname_out,
+    $args_opt, $verbose, @args);
+  ($fname_list_in, $dim_name, $newdim_flag, $start, $step, $fname_out, 
+    $args_opt, $verbose) = @_;
+
+  @args = ('mincconcat', @$args_opt, '-nocheck_dimensions',
+           '-concat_dimension', $dim_name);
+  if ($newdim_flag) {
+    push(@args, '-start', $start, '-step', $step);
+    if ($step < 0) {
+      push(@args, '-descending');
+    }
+  }
+  push(@args, '-filelist', $fname_list_in, $fname_out);
+  &do_cmd(@args, $verbose);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub no_white {
+  my ($result);
+  $result = shift;
+  
+  chomp($result);
+  $result =~ s/^\s+//;
+  $result =~ s/\s+$//;
+  $result =~ s/(\s)+/ /g;
+
+  return($result);
+} 
+
+#
+# ------------------------------------------------------------
+#
+
+sub no_white_ends {
+  my ($result);
+  $result = shift;
+
+  chomp($result);
+  $result =~ s/^\s+//;
+  $result =~ s/\s+$//;
+
+  return($result);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub convert_string_parms {
+  my ($s);
+  $s = shift;
+  
+  $s = no_white($s);
+  return(split(' ', $s));
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub do_cmd {
+  my (@args, $verbose);
+  @args = @_;
+  $verbose = pop(@args);
+
+  print STDERR "@args\n" if $verbose;
+  if (system(@args) != 0) {
+    print STDERR "@args\n";
+    print STDERR "Command Failed !!!\n";
+    die;
+  }
+}
+
+
+#
+# ------------------------------------------------------------
+#
+
+sub cleanup {
+  my ($tmpdir, $verbose, @args);
+  ($tmpdir, $verbose) = shift;
+  
+  print STDERR "Cleaning up ......\n" if $verbose;
+  @args = ('rm', '-r', '-f', $tmpdir);
+  if (-e $tmpdir) {
+    push(@args, $tmpdir);
+  }
+  system(@args);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub array_contains_string {
+  my ($list, $s, $flag, $i);
+  $list = shift;
+  $s = shift;
+
+  $flag = 0;
+  foreach $i (@$list) {
+    if ($i eq $s) {
+      $flag = 1;
+    }
+  }
+
+  return($flag);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub history_add {
+  my ($fname, $history, $verbose);
+  ($fname, $history, $verbose) = @_;
+
+  &do_cmd('minc_modify_header', '-sinsert', ":history=$history", 
+           $fname, $verbose);
+}
+  
+#
+# ------------------------------------------------------------
+#
+
+sub my_mkdir {
+  my ($dirname, $verbose);
+  ($dirname, $verbose) = @_;
+
+  &do_cmd('mkdir', $dirname, $verbose) if (!-e $dirname);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub make_tempdir {
+  my ($tmpdir_base, $subdir, $verbose, $tmpdir);
+  ($tmpdir_base, $subdir, $verbose) = @_; 
+
+  &my_mkdir($tmpdir_base, $verbose); 
+  $tmpdir = "$tmpdir_base/$subdir";
+  &my_mkdir($tmpdir, $verbose);
+
+  return $tmpdir;
+}
+
+  
+#
+# ------------------------------------------------------------
+#
+
+sub check_infile {
+  my ($my_name, $infile);
+  ($my_name, $infile) = @_; 
+
+  die "$my_name: Couldn't find $infile\n\n" if (!-e $infile);
+}
+
+  
+#
+# ------------------------------------------------------------
+#
+
+sub check_outfile {
+  my ($my_name, $outfile, $clobber);
+  ($my_name, $outfile, $clobber) = @_; 
+
+  if(-e $outfile && !$clobber){
+    die "$my_name: $outfile exists, use -clobber to overwrite\n\n";
+  }
+}
+  
+#
+# ------------------------------------------------------------
+#
+
+#
+#  check_input_args -
+#
+#	$num_usage is the number of input and output files required by a script
+#	$minc is 0 if the first input is a minc file and 1 otherwise
+#
+sub check_input_args {
+  my ($me, $Help, $Usage, $num_usage, $opt_table, $argv, $minc, $history, $history_prev);
+  ($me, $Help, $Usage, $num_usage, $opt_table, $argv, $minc) = @_;
+ 
+  $history = no_white(`date`);
+  $history .= '>>>> ' . join(' ', $me, @$argv);
+  &Getopt::Tabular::SetHelp($Help, $Usage);
+  &GetOptions($opt_table, $argv) || exit 1;
+  if ($num_usage > -2) {
+    die $Usage if (@$argv != $num_usage);
+  }
+  if (($minc == 0) || ($minc == 1)) {
+    if (($minc == 0) && (@$argv > 0)) {
+      $history_prev = no_white_ends(join('', `mincinfo -attvalue :history $$argv[0]`)) . "\n";
+    } else {
+      $history_prev = "";
+    }
+  } else {
+    die "check_input_args \$minc flag is not set correctly in $me\n";
+  }
+ 
+  return($history_prev . $history . "\n"); 
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub create_args_opt {
+  my ($quiet, @args);
+  ($quiet) = @_; 
+
+  @args = ('-clobber');
+  if ($quiet) {
+    push(@args , '-quiet');
+  }
+
+  return(@args);
+}
+  
+#
+# ------------------------------------------------------------
+#
+
+#
+#  read_file -
+#
+#	includes skipping lines that begin with a "#"
+#
+sub read_file {
+  my ($fname, @s, $s2);
+  ($fname) = @_; 
+
+  open(FILE, $fname);
+  @s= <FILE>;
+  close(FILE);
+
+  $s2 = "";
+  foreach (@s) {
+    if (!($_ =~ /^#/)) {
+      $s2 .= $_;
+    }
+  }
+  
+  return($s2);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub write_file {
+  my ($fname, $s);
+  ($fname, $s) = @_;
+
+  open(FILE, ">$fname");
+  print FILE $s;
+  close(FILE);
+}
+  
+#
+# ------------------------------------------------------------
+#
+
+sub read_parms {
+  my ($fname, $s);
+  ($fname) = @_; 
+
+  $s = read_file($fname);
+  $s = no_white($s);
+  return(split(/ /, $s));
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub read_vector {
+  my ($fname, @v);
+  ($fname) = @_;
+
+  @v = read_parms($fname);
+  if ($v[1] != 1) {
+    print STDERR "ERROR - $fname is not a vector file\n";
+    die;
+  }
+  if ($v[0] != @v - 2) {
+    print STDERR "ERROR - the length is specified incorrectly in $fname\n";
+    die;
+  }
+  return(@v[2..$#v]);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub read_matrix {
+  my (@v, $i, $j, @m);
+  
+  @v = read_parms(@_);  
+  if ($v[0] * $v[1] != @v - 2) {
+    print STDERR "ERROR - the length is specified incorrectly in @_\n";
+    die;
+  }
+  for ($i = 0; $i < $v[0]; $i++) {
+    for ($j = 0; $j < $v[1]; $j++) {
+      $m[$i][$j] = $v[($i * $v[1]) + $j + 2];
+    }
+  }
+  return(\@m);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub generate_header {
+  my ($s, @s2, $s3, $i);
+  ($s) = @_;
+
+  @s2 = split(/\n/, no_white_ends($s));
+  for ($i = 0; $i < @s2; $i++) {
+    $s2[$i] = "# $s2[$i]\n";
+  }
+  $s3 = "#\n" . join("", @s2) . "#\n";
+ 
+  return($s3);
+} 
+  
+#
+# ------------------------------------------------------------
+#
+
+sub write_parms {
+  my ($fname, $v, $delim);
+  ($fname, $v, $delim) = @_;
+
+  write_file($fname, join($delim, @$v));
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub write_vector {
+  my ($fname, $header, $v, $size1, $i);
+  die "ERROR - not enough input arguments to write_vector @_\n" if (@_ != 3);
+  ($fname, $header, $v) = @_;
+
+  $size1 = $#{@$v} + 1;
+  open(FILE, ">$fname");
+  print FILE generate_header($header);
+  print FILE "$size1 1";
+  for ($i = 0; $i <= $size1; $i++) {
+    print FILE "\n$$v[$i]\n";
+  }
+  close(FILE);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub write_matrix {
+  my ($fname, $header, $m, $size1, $size2, $i, $j);
+  ($fname, $header, $m) = @_;
+
+  $size1 = $#{@$m} + 1;
+  $size2 = $#{$$m[0]} + 1;
+  open(FILE, ">$fname");
+  print FILE generate_header($header);
+  print FILE "$size1 $size2\n";
+  for ($i = 0; $i <= $size1; $i++) {
+    for ($j = 0; $j <= $size2; $j++) {
+      print FILE "$$m[$i][$j] ";
+    }
+    print FILE "\n";
+  }
+  close(FILE);
+}
+    
+#
+# ------------------------------------------------------------
+#
+
+sub minc_dim {
+  my ($fname, $dimname, $a, $b, $c);
+  ($fname, $dimname) = @_;
+
+  $a = no_white(`mincinfo -dimlength $dimname $fname`); 
+  $b = no_white(`mincinfo -attvalue $dimname:start $fname`); 
+  $c = no_white(`mincinfo -attvalue $dimname:step $fname`);
+
+  return($a, $b, $c); 
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub minc_stats {
+  my ($fname, @args);
+  ($fname, @args) = @_;
+ 
+  return(no_white(`mincstats -quiet @args $fname`));
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub data_mean_variance {
+  my (@v, $sum, $sum2, $i, $n, $a, $b);
+  @v = @_;
+
+  $sum = 0;
+  $sum2 = 0;
+  for ($i = 0; $i < @v; $i++) {
+    $sum += $v[$i];
+    $sum2 += $v[$i] * $v[$i];
+  }
+  $n = @v;
+  $a = ($sum2 / $n);
+  $b = ($sum / $n);
+
+  return($b, ($a - $b*$b) * ($n / ($n - 1)));
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub eval_mean_std {
+  my ($fname, $mask, $outliers, $tmpdir, $tmpdir2, $mask2, $mean, $std);
+  ($fname, $mask, $outliers, $tmpdir) = @_;
+
+  $tmpdir2 = "$tmpdir/print_mean_std"; 
+  my_mkdir($tmpdir2, 0);
+
+  $mask2 = "$tmpdir2/mask2.mnc";
+  &do_cmd('mask_outliers', '-quiet', '-clobber', '-tmpdir', $tmpdir2, 
+          '-outliers', $outliers, '-mask', $mask, $fname, $mask2, 0);
+
+  $mean = no_white(`mincstats -quiet -mean $fname -mask $mask2 -mask_floor 0.5`);
+  $std = no_white(`mincstats -quiet -stddev $fname -mask $mask2 -mask_floor 0.5`);
+  
+  return($mean, $std);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub vector_sum {
+  my ($fname, @v, $sum, $i);
+  ($fname) = @_;
+
+  @v = read_vector($fname);
+  $sum = 0;
+  for ($i = 0; $i < @v; $i++) {
+    $sum += $v[$i];
+  }
+
+  return($sum);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub vector_mean {
+  my ($fname, @v, $sum, $i);
+  ($fname) = @_;
+
+  @v = read_vector($fname);
+  $sum = 0;
+  for ($i = 0; $i < @v; $i++) {
+    $sum += $v[$i];
+  }
+
+  return($sum / @v);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub vector_variance {
+  my ($fname, @v, $sum, $sum2, $n, $a, $b, $i);
+  ($fname) = @_;
+
+  @v = read_vector($fname);
+  $sum = 0;
+  $sum2 = 0;
+  for ($i = 0; $i < @v; $i++) {
+    $sum += $v[$i];
+    $sum2 += $v[$i] * $v[$i];
+  }
+  
+  $n = @v;
+  $a = ($sum2 / $n);
+  $b = ($sum / $n);
+  return(($a - $b*$b) * ($n / ($n - 1)));
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub vector_dot_product {
+  my ($fname1, $fname2, @v1, @v2, $sum, $i);
+  ($fname1, $fname2) = @_;
+
+  @v1 = read_vector($fname1);
+  @v2 = read_vector($fname2);
+  $sum = 0;
+  for ($i = 0; $i <= @v1; $i++) {
+    $sum += $v1[$i] * $v2[$i];
+  }
+
+  return($sum);
+}
+    
+#
+# ------------------------------------------------------------
+#
+
+sub vector_normalize {
+  my ($fname_in, $fname_out, @v, $n, $i);
+  ($fname_in, $fname_out) = @_;
+  
+  @v = read_vector($fname_in);
+  $n = sqrt(vector_dot_product(\@v, \@v));
+  if (($n > -0.0000001) && ($n < 0.0000001)) {
+    $n = 1;
+  }
+  for ($i = 0; $i < @v; $i++) {
+    $v[$i] /= $n;
+  }
+  write_vector($fname_out, @v);
+
+  return($n);
+}
+    
+#
+# ------------------------------------------------------------
+#
+
+sub vector_scalar_add {
+  my ($fname_in, $fac, $fname_out, @v, $i);
+  ($fname_in, $fac, $fname_out) = @_;
+
+  @v = read_vector($fname_in);
+  for ($i = 0; $i < @v; $i++) {
+    $v[$i] += $fac;
+  }
+  write_vector($fname_out, @v);
+}
+
+#
+# ------------------------------------------------------------
+#
+
+sub vector_scalar_mult {
+  my ($fname_in, $fac, $fname_out, @v, $i);
+  ($fname_in, $fac, $fname_out) = @_;
+
+  @v = read_vector($fname_in);
+  for ($i = 0; $i < @v; $i++) {
+    $v[$i] *= $fac;
+  }
+  write_vector($fname_out, @v);
+}
+  
+#
+# ------------------------------------------------------------
+#
+
+sub vector_interleave {
+  my (@fname_in, $fname_out, @v, $length, @v_temp, $i, $j, @v2);
+  (@fname_in, $fname_out) = @_;
+
+  @v = read_vector($fname_in[0]);
+  $length = @v;
+  for ($i = 1; $i < @fname_in; $i++) {
+    @v_temp = read_vector($fname_in[$i]);
+    die "ERROR - vector_interleave called with an uneven number of elements in each vector\n\n" 
+        if ($length != @v_temp);
+    push(@v, @v_temp);
+  }
+
+  for ($i = 0; $i < $length; $i++) {
+    for ($j = 0; $j < @fname_in; $j++) {
+      $v2[$i*@fname_in + $j] = $v[$i + $j*$length];
+    }
+  }
+
+  write_vector($fname_out, @v2);
+}
+

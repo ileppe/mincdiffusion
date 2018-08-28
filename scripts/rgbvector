@@ -1,0 +1,25 @@
+#!/bin/csh
+
+if ($#argv != 5) then
+echo "Usage: rgbvector <e1x.mnc> <e1y.mnc> <e1z.mnc> <scale_intensity.mnc> <output.mnc>"
+exit
+endif
+
+#normalize
+minccalc -clob -express 'sqrt(A[0]*A[0]+A[1]*A[1]+A[2]*A[2])' $1 $2 $3 /tmp/mag.mnc
+
+minccalc -clob -expres "A[1]>0.01?clamp(abs(A[0])/A[1],0,1):0" $1 /tmp/mag.mnc /tmp/e1x_abs.mnc 
+minccalc -clob -expres "A[1]>0.01?clamp(abs(A[0])/A[1],0,1):0" $2 /tmp/mag.mnc /tmp/e1y_abs.mnc
+minccalc -clob -expres "A[1]>0.01?clamp(abs(A[0])/A[1],0,1):0" $3 /tmp/mag.mnc /tmp/e1z_abs.mnc
+
+mincmath  -mult $4 /tmp/e1x_abs.mnc /tmp/e1x_abs_AI.mnc 
+mincmath  -mult $4 /tmp/e1y_abs.mnc /tmp/e1y_abs_AI.mnc 
+mincmath  -mult $4 /tmp/e1z_abs.mnc /tmp/e1z_abs_AI.mnc 
+
+
+mincmakevector /tmp/e1x_abs_AI.mnc /tmp/e1y_abs_AI.mnc /tmp/e1z_abs_AI.mnc $5
+
+rm -f /tmp/e1x_abs_AI.mnc /tmp/e1y_abs_AI.mnc /tmp/e1z_abs_AI.mnc /tmp/e1x_abs.mnc /tmp/e1y_abs.mnc /tmp/e1z_abs.mnc /tmp/mag.mnc
+
+
+#Display will now work on the rgb data...also register will. keep it as vector.
