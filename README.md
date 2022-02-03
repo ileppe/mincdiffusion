@@ -6,7 +6,9 @@ DISCLAIMER: This is an archive of a group of diffusion MRI processing programs c
 
 -The deconvolution and probabilistic deconvolution do not implement the now state-of-the-art constrained spherical deconvolution.
 
--The FACT integration used throughout all of the tractography is now not commonly used.
+-The FACT integration used throughout all of the tractography is now not commonly used, and there is no interpolation in this implementation.
+
+-The fiber ODF and maximum extraction is discretized at the acquisition angular resolution.
 
 -The single fiber response function is hardcoded for an average healthy brain acquired with an outdated acquisition.
 
