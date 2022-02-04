@@ -2,7 +2,7 @@ DISCLAIMER: This is an archive of a group of diffusion MRI processing programs c
 
 -This is not part of the minc project and does not meet its standards.
 
--This is not a mature project and not meant for external use. The current version is largely at the prototype stage. It is now not being maintained.
+-This is not a mature project and not meant for external use. The current version is largely at the prototype/WIP stage. It is now not being maintained.
 
 -The deconvolution and probabilistic deconvolution do not implement the now state-of-the-art constrained spherical deconvolution.
 
