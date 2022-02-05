@@ -289,8 +289,6 @@ void Deconvolver::Deconvolve(int x,int y,int z)
 
 void Deconvolver::Deconv2Sphere(int x,int y,int z)
 {
-  
-  
 
   int n,l;
   int rank=(m_order+1)*(m_order+2)/2;
