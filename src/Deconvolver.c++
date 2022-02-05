@@ -289,11 +289,7 @@ void Deconvolver::Deconvolve(int x,int y,int z)
 
 void Deconvolver::Deconv2Sphere(int x,int y,int z)
 {
-  //calc SH rep.s of the voxel and the response
-  //divide (real)
-  //check for neg here?
-  //then reconstruct the image domain m_deconvolved
-
+  
   
 
   int n,l;
